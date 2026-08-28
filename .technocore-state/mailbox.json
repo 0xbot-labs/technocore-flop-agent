@@ -1,4 +1,5 @@
 {
   "room": "mb-p-37a78f6e4d1c4aa56423ecc7ef496b48",
-  "initialized": false
+  "initialized": true,
+  "init_seq": 1
 }
