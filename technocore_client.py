@@ -91,21 +91,38 @@ def directory_path(did: str) -> str:
     return f"/kv/did-{digest[:2]}/{digest[2:]}"
 
 
+RETRYABLE_CODES = {429, 502, 503, 504}
+MAX_RETRIES = 4
+
+
 def _request(path: str, payload: dict[str, Any] | None = None) -> str:
     body = None
     headers = {"User-Agent": "technocore-heartbeat/1.0"}
     if payload is not None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(ORIGIN + path, data=body, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return resp.read().decode("utf-8")
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace").strip()
-        raise SystemExit(f"HTTP {e.code}: {detail}") from e
-    except urllib.error.URLError as e:
-        raise SystemExit(f"request failed: {e.reason}") from e
+
+    last_err: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        if attempt > 0:
+            delay = 2 ** attempt          # 2, 4, 8, 16 seconds
+            print(f"[retry] attempt {attempt}/{MAX_RETRIES} in {delay}s …", file=sys.stderr)
+            time.sleep(delay)
+        req = urllib.request.Request(ORIGIN + path, data=body, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace").strip()
+            if e.code in RETRYABLE_CODES:
+                last_err = SystemExit(f"HTTP {e.code}: {detail}")
+                continue
+            raise SystemExit(f"HTTP {e.code}: {detail}") from e
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = SystemExit(f"request failed: {e}")
+            continue
+
+    raise last_err  # type: ignore[misc]
 
 
 def _note_value(response: str) -> str:
