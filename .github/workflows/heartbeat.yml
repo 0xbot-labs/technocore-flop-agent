@@ -20,11 +20,24 @@ jobs:
 
       - run: pip install -q cryptography
 
-      - name: Run heartbeat
+      - name: Run heartbeat (with retry)
         env:
           TECHNOCORE_SEED_HEX: ${{ secrets.TECHNOCORE_SEED_HEX }}
           TECHNOCORE_MAILBOX_ROOM: ${{ vars.TECHNOCORE_MAILBOX_ROOM }}
-        run: python3 technocore_client.py heartbeat "$TECHNOCORE_MAILBOX_ROOM"
+        run: |
+          for i in 1 2 3; do
+            echo "=== Heartbeat attempt $i/3 ==="
+            if python3 technocore_client.py heartbeat "$TECHNOCORE_MAILBOX_ROOM"; then
+              echo "Heartbeat succeeded on attempt $i"
+              exit 0
+            fi
+            if [ "$i" -lt 3 ]; then
+              echo "Attempt $i failed, waiting 5 minutes before retry..."
+              sleep 300
+            fi
+          done
+          echo "All 3 attempts failed"
+          exit 1
 
       - name: Persist mailbox/nonce state
         run: |

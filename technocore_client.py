@@ -92,7 +92,8 @@ def directory_path(did: str) -> str:
 
 
 RETRYABLE_CODES = {429, 502, 503, 504}
-MAX_RETRIES = 4
+MAX_RETRIES = 6
+MAX_BACKOFF = 30
 
 
 def _request(path: str, payload: dict[str, Any] | None = None) -> str:
@@ -105,7 +106,7 @@ def _request(path: str, payload: dict[str, Any] | None = None) -> str:
     last_err: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         if attempt > 0:
-            delay = 2 ** attempt          # 2, 4, 8, 16 seconds
+            delay = min(2 ** attempt, MAX_BACKOFF)  # 2,4,8,16,30,30 seconds
             print(f"[retry] attempt {attempt}/{MAX_RETRIES} in {delay}s …", file=sys.stderr)
             time.sleep(delay)
         req = urllib.request.Request(ORIGIN + path, data=body, headers=headers)
