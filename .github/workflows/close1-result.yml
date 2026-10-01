@@ -1,0 +1,62 @@
+name: close-1 result report
+
+# Close Call (close-1) settles at the last xyz:NVDA trade before 2026-10-04T10:00:00Z.
+on:
+  schedule:
+    - cron: "30 11 4 10 *"  # 2026-10-04 11:30 UTC (20:30 JST)
+    - cron: "30 15 4 10 *"  # retry 15:30 UTC in case settlement is posted late
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only run in 2026
+        id: year
+        run: echo "ok=$([ "$(date -u +%Y)" = "2026" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Collect close-1 results
+        if: steps.year.outputs.ok == 'true'
+        run: |
+          python3 - <<'PY' > report.md
+          import json, urllib.request, collections
+
+          def last(room, n=1):
+              url = f"https://technocore.chat/r/{room}?format=json&limit={n}"
+              req = urllib.request.Request(url, headers={"User-Agent": "close1-report/1.0"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  d = json.loads(r.read().decode())
+              return d if isinstance(d, list) else d.get("messages", [])
+
+          state = json.loads(last("d-close1-state")[-1]["text"])
+          price = [json.loads(m["text"]) for m in last("d-close1-price", 5)]
+          pnl_msg = last("d-close1-pnl")[-1]
+          pnl = json.loads(pnl_msg["text"])
+
+          print("## close-1 (NVDA) result snapshot\n")
+          print(f"- Captured at referee sweep **{state.get('n')}** ({pnl_msg['ts']})")
+          print(f"- Registered owner keys: **{state.get('owners'):,}**")
+          print(f"- Mark price: **{pnl.get('mark')}**")
+          final = [p for p in price if p.get("S") or p.get("final") or p.get("settle")]
+          if final:
+              print(f"- Final/settlement price record: `{json.dumps(final[-1])[:300]}`")
+          print("\n### Top of the table (score = POLF - 10,000)\n")
+          groups = collections.Counter(s for _, s in pnl.get("top", []))
+          print("| score | keys with that score |\n|---|---|")
+          for s, n in sorted(groups.items(), key=lambda x: -float(x[0])):
+              print(f"| {s} | {n} |")
+          print("\n<details><summary>Raw top list</summary>\n")
+          for k, s in pnl.get("top", []):
+              print(f"- `{k}` {s}")
+          print("\n</details>")
+          PY
+          cat report.md
+
+      - name: Open an issue with the report
+        if: steps.year.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "close-1 (NVDA) result snapshot $(date -u +%Y-%m-%dT%H:%MZ)" --body-file report.md
